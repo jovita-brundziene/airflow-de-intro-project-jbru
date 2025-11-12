@@ -85,8 +85,8 @@ def upload_parquet_files_to_s3(bucket_name, local_directory, s3_prefix, dry_run=
 upload_parquet_files_to_s3(
     bucket_name='alpha-hmcts-de-testing-sandbox',
     local_directory='data/example-data',
-    s3_prefix='de-intro-project-jb/path',
-    dry_run=True
+    s3_prefix='de-intro-project-jb/dev',
+    dry_run=False
 )
 
 ##############################################################################
@@ -128,9 +128,18 @@ def load_parquet_files_from_s3(bucket_name, s3_prefix):
     all_dfs = []
 
     for file_path in parquet_files:
-        df = reader.read(file_path)  # reader handles S3 paths directly
+        s3_uri = f"s3://{file_path}"  # prepend s3://
+        df = reader.read(s3_uri)      # now reader sees full S3 URI
         all_dfs.append(df)
 
     return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+
+#load data
+bucket = "alpha-hmcts-de-testing-sandbox"
+prefix = "de-intro-project-jb/dev"
+
+df = load_parquet_files_from_s3(bucket, prefix)
+print(df.head())
+
 
 
