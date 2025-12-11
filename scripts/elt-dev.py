@@ -5,6 +5,10 @@
 """
 To do:
 - Go through repo steps
+    - add mojap columns
+    Write table to S£
+    Move files to raw hist
+    Apply scd2
 - Include dev/prod environment parameters
 - add parameters to config file
 - create a docker image
@@ -25,8 +29,12 @@ import s3fs
 from arrow_pd_parser import reader
 import pandas as pd
 
+import json
+import os
+from mojap_metadata import Metadata
+
 ##############################################################################
-# extract data from local to S3
+# Extract data from local to S3
 ##############################################################################
 
 # Set up logging configuration
@@ -140,6 +148,92 @@ prefix = "de-intro-project-jb/dev"
 
 df = load_parquet_files_from_s3(bucket, prefix)
 print(df.head())
+
+##############################################################################
+# Enforce Metadata types
+##############################################################################
+
+# load metadata function
+def load_metadata(filename: str) -> dict:
+    """
+    Load metadata from a JSON file located in the data/metadata folder.
+    """
+    metadata_path = os.path.join("data", "metadata", filename)
+    with open(metadata_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+# load metadata
+metadata = load_metadata("intro-project-metadata.json")
+metadata
+
+# create Metadata object from JSON
+metadata_obj = Metadata.from_dict(metadata)
+
+#validate metadata against schema
+metadata_obj.validate()
+
+# function to normalise column names to lowercase and replace spaces with underscores
+def normalize_column_names(df):
+    df.columns = [c.lower().replace(" ", "_") for c in df.columns]
+    return df
+
+# apply normalisation
+df = normalize_column_names(df)
+
+# convert 'Date of birth' from 'YYYY-MM-DD' to ISO timestamp format 'YYYY-MM-DDTHH:MM:SS'
+def convert_to_iso_timestamp(date_str):
+    if pd.isna(date_str):
+        return None
+    try:
+        # Parse date string and format as ISO timestamp
+        return pd.to_datetime(date_str, format='%Y-%m-%d').strftime('%Y-%m-%dT%H:%M:%S')
+    except Exception as e:
+        print(f'Error converting {date_str}: {e}')
+        return None
+
+# apply dob conversion
+df['date_of_birth'] = df['date_of_birth'].apply(convert_to_iso_timestamp)
+
+df.head()
+    
+# function for metadata enforcement
+def enforce_metadata_types(df, metadata_obj):
+    """
+    Enforce column data types in a DataFrame based on mojap-metadata schema.
+    Handles both dict-based and object-based columns.
+    """
+    for col in metadata_obj.columns:
+        # Detect if col is dict or object
+        if isinstance(col, dict):
+            col_name = col["name"].lower().replace(" ", "_")
+            col_type = col["type"]
+            fmt = col.get("datetime_format", None)
+        else:  # Column-like object
+            col_name = col.name.lower().replace(" ", "_")
+            col_type = col.type
+            fmt = getattr(col, "datetime_format", None)
+
+        if col_name not in df.columns:
+            print(f"⚠️ Column '{col_name}' not found in DataFrame.")
+            continue
+
+        # Apply type casting
+        if col_type == "string":
+            df[col_name] = df[col_name].astype("string")
+        elif col_type.startswith("timestamp"):
+            df[col_name] = pd.to_datetime(df[col_name], format=fmt, errors="coerce")
+        elif col_type in ["int", "integer"]:
+            df[col_name] = pd.to_numeric(df[col_name], errors="coerce").astype("Int64")
+        elif col_type in ["float", "double"]:
+            df[col_name] = pd.to_numeric(df[col_name], errors="coerce")
+
+    return df
+
+#enforce metadata types
+df = enforce_metadata_types(df, metadata_obj)
+
+print(df.dtypes)
+df.head()
 
 
 
