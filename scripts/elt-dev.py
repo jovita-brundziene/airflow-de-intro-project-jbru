@@ -4,9 +4,17 @@
 ##############################################################################
 """
 To do:
+- improvements:
+    modularise
+    print vs logging in functions
+    just show log exceptions rather than everything
+    close files after transform to avoid overloading cache
+    dockstrings -  specify data types in function parameters
+    add return to all functions
+    check path in extract
 - Go through repo steps
-    - add mojap columns
-    Write table to S£
+    add mojap columns
+    Write table to S3
     Move files to raw hist
     Apply scd2
 - Include dev/prod environment parameters
@@ -14,7 +22,7 @@ To do:
 - create a docker image
 - create a github action to run pipeline automatically
 - create unit tests
-- modularise code into at least config, functions and run
+- modularise code into at least config, functions and run and logging?
 - Update requirements file and build it into the script
 - Requirements lint?
 - Nice to have: package it up as a python package?
@@ -164,7 +172,7 @@ def load_metadata(filename: str) -> dict:
 
 # load metadata
 metadata = load_metadata("intro-project-metadata.json")
-metadata
+print(metadata)
 
 # create Metadata object from JSON
 metadata_obj = Metadata.from_dict(metadata)
@@ -194,7 +202,7 @@ def convert_to_iso_timestamp(date_str):
 # apply dob conversion
 df['date_of_birth'] = df['date_of_birth'].apply(convert_to_iso_timestamp)
 
-df.head()
+print(df.head())
     
 # function for metadata enforcement
 def enforce_metadata_types(df, metadata_obj):
@@ -233,7 +241,7 @@ def enforce_metadata_types(df, metadata_obj):
 df = enforce_metadata_types(df, metadata_obj)
 
 print(df.dtypes)
-df.head()
+print(df.head())
 
 
 
