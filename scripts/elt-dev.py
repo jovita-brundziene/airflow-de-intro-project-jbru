@@ -1,16 +1,23 @@
-
 ##############################################################################
 # development ELT script for dummy pipeline
 ##############################################################################
 """
+To discuss:
+- to call as modules in .ipynb?
+- debugging/ running code in chunks?
+- Visualisation of new repo structure
+- python entry point
+
+Done:
+- modularised refactored code to split into constants, functions and run scripts
+- use logging consistently
+- added data types to dockstrings
+- use dockstrings consistently
+- split monolithic functions
+- close files after transform to avoid overloading cache
+
 To do:
 - improvements:
-    modularise
-    print vs logging in functions
-    just show log exceptions rather than everything
-    close files after transform to avoid overloading cache
-    dockstrings -  specify data types in function parameters
-    add return to all functions
     check path in extract
 - Go through repo steps
     add mojap columns
@@ -18,11 +25,9 @@ To do:
     Move files to raw hist
     Apply scd2
 - Include dev/prod environment parameters
-- add parameters to config file
 - create a docker image
 - create a github action to run pipeline automatically
 - create unit tests
-- modularise code into at least config, functions and run and logging?
 - Update requirements file and build it into the script
 - Requirements lint?
 - Nice to have: package it up as a python package?
@@ -51,59 +56,91 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# function for uploading parquet files to S3
-# -----> Improvement: can I separate out logging from core function? <-----
+# Refactored functions for listing, checking, and uploading parquet files to S3 with logging
+
+def list_parquet_files(local_directory):
+    """
+    List all .parquet files in a local directory.
+
+    Parameters:
+        local_directory (str): Path to the local directory.
+
+    Returns:
+        list: List of .parquet file paths.
+    """
+    return [
+        os.path.join(local_directory, file)
+        for file in os.listdir(local_directory)
+        if file.endswith('.parquet')
+    ]
+
+def file_exists_in_s3(bucket_name, s3_key):
+    """
+    Check if a file exists in an S3 bucket.
+
+    Parameters:
+        bucket_name (str): Name of the S3 bucket.
+        s3_key (str): Path of the file in the S3 bucket.
+
+    Returns:
+        bool: True if the file exists, False otherwise.
+    """
+    s3 = boto3.client('s3')
+    try:
+        s3.head_object(Bucket=bucket_name, Key=s3_key)
+        logging.info(f"File exists in S3: s3://{bucket_name}/{s3_key}")
+        return True
+    except ClientError as e:
+        if e.response['Error']['Code'] == '404':
+            logging.info(f"File does not exist in S3: s3://{bucket_name}/{s3_key}")
+            return False
+        logging.error(f"Error checking existence of {s3_key}: {e}")
+        raise
+
 def upload_parquet_files_to_s3(bucket_name, local_directory, s3_prefix, dry_run=True):
     """
-    Uploads .parquet files from a local directory to an S3 bucket under a specified prefix.
+    Upload .parquet files from a local directory to an S3 bucket under a specified prefix.
 
     Parameters:
         bucket_name (str): Name of the S3 bucket.
         local_directory (str): Path to the local directory containing .parquet files.
         s3_prefix (str): Path prefix within the S3 bucket.
         dry_run (bool): If True, simulates the upload without actually uploading files.
+
+    Returns:
+        list: List of successfully uploaded file paths.
     """
-    # Create an S3 client using boto3
-    s3 = boto3.client('s3')
+    parquet_files = list_parquet_files(local_directory)
+    uploaded_files = []
 
-    # Loop through all files in the specified local directory
-    for file in os.listdir(local_directory):
-        # Only process files with a .parquet extension
-        if file.endswith('.parquet'):
-            # Construct the full local file path
-            local_path = os.path.join(local_directory, file)
-            # Define the S3 object key (i.e., path within the bucket)
-            s3_key = f'{s3_prefix}/{file}'
+    for local_path in parquet_files:
+        file_name = os.path.basename(local_path)
+        s3_key = f"{s3_prefix}/{file_name}"
 
+        if file_exists_in_s3(bucket_name, s3_key):
+            logging.info(f"Skipping upload for existing file: {local_path}")
+            continue
+
+        if dry_run:
+            logging.info(f"[DRY RUN] Would upload: {local_path} to s3://{bucket_name}/{s3_key}")
+        else:
             try:
-                # Check if the file already exists in the S3 bucket
-                s3.head_object(Bucket=bucket_name, Key=s3_key)
-                logging.info(f"File already exists in S3: s3://{bucket_name}/{s3_key} — skipping upload.")
-            except ClientError as e:
-                # If the error code is 404, the file does not exist — proceed with upload
-                if e.response['Error']['Code'] == '404':
-                    if dry_run:
-                        # Simulate the upload in dry run mode
-                        print(f"[DRY RUN] Would upload: {local_path} to s3://{bucket_name}/{s3_key}")
-                    else:
-                        # Attempt to upload the file to S3
-                        try:
-                            s3.upload_file(local_path, bucket_name, s3_key)
-                            logging.info(f"Successfully uploaded: {local_path} to s3://{bucket_name}/{s3_key}")
-                        except Exception as upload_error:
-                            logging.error(f"Failed to upload: {local_path}. Error: {upload_error}")
-                else:
-                    # Log unexpected errors during head_object check
-                    logging.error(f"Error checking existence of {s3_key}: {e}")
+                s3 = boto3.client('s3')
+                s3.upload_file(local_path, bucket_name, s3_key)
+                logging.info(f"Successfully uploaded: {local_path} to s3://{bucket_name}/{s3_key}")
+                uploaded_files.append(local_path)
+            except Exception as e:
+                logging.error(f"Failed to upload: {local_path}. Error: {e}")
 
-#upload data to S3
-#turn this into a config file
-upload_parquet_files_to_s3(
-    bucket_name='alpha-hmcts-de-testing-sandbox',
-    local_directory='data/example-data',
-    s3_prefix='de-intro-project-jb/dev',
-    dry_run=False
-)
+    return uploaded_files
+
+# Example usage
+#upload_parquet_files_to_s3(
+#    bucket_name='alpha-hmcts-de-testing-sandbox',
+#    local_directory='data/example-data',
+#    s3_prefix='de-intro-project-jb/dev',
+#    dry_run=False
+#)
 
 ##############################################################################
 # Load data
